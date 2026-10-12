@@ -4,7 +4,7 @@
 **Niveau :** LSI 3
 **Projet :** `TP1-DAR2026`
 
-Ce TP met en place une communication TCP entre une application cliente Java et une application serveur Java. Le serveur écoute sur le port `1234`. Le client peut d’abord établir une connexion, puis envoyer des entiers au serveur afin qu’il calcule leur produit par `5`.
+Ce TP met en place une communication TCP entre une application cliente Java et une application serveur Java. Le serveur écoute sur le port `1234`. Les premières étapes établissent une connexion locale puis réalisent une multiplication par `5`. L’activité complémentaire étend ensuite la connexion à deux machines du même réseau local et ajoute une calculatrice proposant quatre opérations.
 
 ## Organisation du projet
 
@@ -182,6 +182,143 @@ L’entrée `0` sert de signal d’arrêt : le serveur renvoie d’abord `0`, pu
 ![Console du client avec fermeture de la connexion](images/client_version_2.0.png)
 
 ![Console du serveur après fermeture de la connexion](images/server_version_2.0.png)
+
+## Activité complémentaire — Connexion réseau et calculatrice à quatre opérations
+
+Cette activité prolonge la connexion testée sur une seule machine. Elle configure l’adresse IP et le port explicitement, puis remplace le service de multiplication par un menu permettant de choisir une opération.
+
+### Étape 1 — Connexion Client/Serveur sur deux machines
+
+#### Description
+
+Le serveur et le client doivent être exécutés sur deux ordinateurs du même réseau local. Il faut d’abord relever l’adresse IPv4 de la machine serveur, puis remplacer la constante `SERVER_IP` dans les deux classes par cette même adresse. La valeur `192.168.56.1` présente dans le code est un exemple propre à un réseau donné : elle doit être adaptée à la configuration réelle.
+
+Côté serveur, `InetAddress.getByName()` résout l’adresse IP et `ServerSocket.bind()` associe le socket d’écoute à cette adresse et au port choisi :
+
+```java
+private static final String SERVER_IP = "192.168.56.1"; // À adapter
+private static final int PORT = 1234;
+
+InetAddress adresse = InetAddress.getByName(SERVER_IP);
+ServerSocket serverSocket = new ServerSocket();
+serverSocket.bind(new InetSocketAddress(adresse, PORT));
+
+Socket socket = serverSocket.accept();
+```
+
+Côté client, le socket se connecte à une `InetSocketAddress` construite à partir de l’adresse IP de la machine serveur et du même port :
+
+```java
+private static final String SERVER_IP = "192.168.56.1"; // Même IP que côté serveur
+private static final int PORT = 1234;
+
+InetSocketAddress socketAddress =
+        new InetSocketAddress(InetAddress.getByName(SERVER_IP), PORT);
+Socket socket = new Socket();
+socket.connect(socketAddress, 5000);
+```
+
+Les deux ordinateurs doivent pouvoir communiquer entre eux sur le réseau local. Il faut également autoriser les connexions entrantes sur le port TCP `1234` dans le pare-feu du serveur. Lancer le serveur en premier, puis le client.
+
+#### Interprétation
+
+Le serveur affiche l’adresse et le port sur lesquels il écoute. Quand le client se connecte, il affiche la même adresse cible et le serveur confirme la connexion. Si la connexion échoue, vérifier que l’adresse est bien celle de la machine serveur, que les deux machines sont sur le réseau attendu et que le port n’est pas bloqué.
+
+![Configuration de l'adresse IP du serveur](images/ip_machine_server.png)
+
+![Configuration de l'adresse IP du serveur dans le client](images/ip_machine_client.png)
+
+![Serveur en écoute sur l'adresse IP et le port configurés](images/console_server.png)
+
+![Client connecté au serveur sur le réseau local](images/console_client_connecté.png)
+
+### Étape 2 — Calculatrice avec quatre opérations
+
+#### Description
+
+Le menu client propose les choix suivants :
+
+| Choix | Opération |
+|---:|---|
+| `1` | Addition (`x + y`) |
+| `2` | Soustraction (`x - y`) |
+| `3` | Multiplication (`x * y`) |
+| `4` | Division (`x / y`) |
+| `0` | Quitter |
+
+Pour chaque opération, le client envoie au serveur trois entiers dans un ordre convenu : le choix, `x`, puis `y`. Les données sont transmises par `DataOutputStream.writeInt()`. Le serveur les lit dans le même ordre avec `DataInputStream.readInt()`, effectue le calcul choisi, puis renvoie le résultat sous forme de texte avec `DataOutputStream.writeUTF()`. Le client le reçoit avec `DataInputStream.readUTF()` pour l’afficher.
+
+Extrait côté client :
+
+```java
+out.writeInt(choix);
+out.writeInt(x);
+out.writeInt(y);
+out.flush();
+
+System.out.println("Résultat : " + in.readUTF());
+```
+
+Extrait côté serveur :
+
+```java
+int choix = in.readInt();
+int x = in.readInt();
+int y = in.readInt();
+
+String resultat;
+switch (choix) {
+    case 1:
+        resultat = x + " + " + y + " = " + ((long) x + y);
+        break;
+    case 2:
+        resultat = x + " - " + y + " = " + ((long) x - y);
+        break;
+    case 3:
+        resultat = x + " * " + y + " = " + ((long) x * y);
+        break;
+    case 4:
+        resultat = y == 0
+                ? "Erreur : division par zéro impossible"
+                : x + " / " + y + " = " + ((double) x / y);
+        break;
+    default:
+        resultat = "Choix invalide";
+}
+
+out.writeUTF(resultat);
+out.flush();
+```
+
+Le choix `0` est envoyé seul : le serveur répond `Au revoir !` et termine sa boucle. Les choix autres que `0` et `1` à `4` sont refusés côté client. La division par zéro est également contrôlée côté serveur.
+
+#### Interprétation et essais
+
+Les essais ci-dessous illustrent les quatre opérations et les cas particuliers traités par l’application. La division utilise un résultat décimal ; une division par zéro renvoie un message d’erreur au lieu d’effectuer le calcul.
+
+| Choix | Valeurs saisies | Résultat affiché |
+|---|---|---|
+| Addition | `x = 5`, `y = 6` | `5 + 6 = 11` |
+| Soustraction | `x = 9`, `y = 7` | `9 - 7 = 2` |
+| Multiplication | `x = 8`, `y = 7` | `8 * 7 = 56` |
+| Division | `x = 8`, `y = 11` | `8 / 11 = 0.7272727272727273` |
+| Division par zéro | `x = 8`, `y = 0` | `Erreur : division par zéro impossible` |
+| Choix invalide | `7` | `Choix invalide, réessayez.` |
+| Quitter | `0` | `Au revoir !`, puis fermeture de la connexion |
+
+![Essai de l'addition](images/addition.png)
+
+![Essai de la soustraction](images/Soustraction.png)
+
+![Essai de la multiplication](images/Multiplication.png)
+
+![Essai de la division](images/division.png)
+
+![Gestion de la division par zéro](images/Division_0.png)
+
+![Gestion d'un choix de menu invalide](images/choix_invalide.png)
+
+![Sortie propre de la calculatrice](images/quitter_calculatrice.png)
 
 ## Comparaison des résultats
 
